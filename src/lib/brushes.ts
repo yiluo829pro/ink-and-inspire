@@ -157,7 +157,10 @@ export function drawSegment(
 export function replay(ctx: CanvasRenderingContext2D, strokes: Stroke[]) {
   strokes.forEach((s, si) => {
     for (let i = 1; i < s.points.length; i++) {
-      drawSegment(ctx, s, s.points[i - 1], s.points[i], si * 7 + i);
+      const a = s.points[i - 1];
+      const b = s.points[i];
+      if (!a || !b) continue;
+      drawSegment(ctx, s, a, b, si * 7 + i);
     }
   });
 }
