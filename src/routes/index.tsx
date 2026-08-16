@@ -72,9 +72,24 @@ function Index() {
   const font = FONTS.find((f) => f.id === fontId)!;
   const paper = PAPERS[paperIdx]!;
 
+  const [presetLang, setPresetLang] = useState<"zh" | "en">("zh");
+  const [presetQuery, setPresetQuery] = useState("");
+  const visiblePresets = useMemo(() => {
+    const q = presetQuery.trim().toLowerCase();
+    return PRESETS.filter(
+      (p) =>
+        p.lang === presetLang &&
+        (!q ||
+          p.label.toLowerCase().includes(q) ||
+          p.note.toLowerCase().includes(q) ||
+          p.text.toLowerCase().includes(q)),
+    );
+  }, [presetLang, presetQuery]);
+
   const chars = useMemo(() => [...text].filter((c) => c.trim().length > 0), [text]);
   const activeChar = chars[Math.min(charIdx, Math.max(0, chars.length - 1))] ?? "";
   const practiceText = mode === "char" ? activeChar : text;
+
 
   const setTarget = (next: string) => {
     setText(next);
