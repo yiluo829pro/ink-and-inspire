@@ -1,7 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useRef, useState } from "react";
+import { useServerFn } from "@tanstack/react-start";
+import { useMemo, useRef, useState } from "react";
 import { PracticeCanvas } from "@/components/PracticeCanvas";
 import { BRUSHES, type BrushId, type Stroke } from "@/lib/brushes";
+import { extractTextFromImage } from "@/lib/ocr.functions";
 import { FONTS, INKS, PAPERS, PRESETS } from "@/lib/templates";
 import { cn } from "@/lib/utils";
 
@@ -12,13 +14,13 @@ export const Route = createFileRoute("/")({
       {
         name: "description",
         content:
-          "A calm pocket practice pad: trace poems and slogans in classical calligraphy fonts, or free-draw with ink, watercolor, oil and pencil brushes.",
+          "A calm pocket practice pad: snap a slogan, trace poems in classical calligraphy fonts character by character, or free-draw with ink, watercolor, oil and pencil brushes.",
       },
       { property: "og:title", content: "Inkwell — Calligraphy & Drawing Practice Pad" },
       {
         property: "og:description",
         content:
-          "Trace poems and slogans in classical calligraphy fonts, or free-draw with ink, watercolor, oil and pencil brushes.",
+          "Snap a photo of a slogan, pull its words onto the pad, and practice the whole sentence or one character at a time.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -38,8 +40,21 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
   );
 }
 
+async function fileToDataUrl(file: File, max = 1400): Promise<string> {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, max / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+  const ctx = canvas.getContext("2d")!;
+  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/jpeg", 0.85);
+}
+
 function Index() {
   const [text, setText] = useState("床前明月光\n疑是地上霜");
+  const [mode, setMode] = useState<"sentence" | "char">("sentence");
+  const [charIdx, setCharIdx] = useState(0);
   const [fontId, setFontId] = useState(FONTS[0]!.id);
   const [brush, setBrush] = useState<BrushId>("ink");
   const [color, setColor] = useState(INKS[0]!.value);
@@ -48,10 +63,47 @@ function Index() {
   const [ghost, setGhost] = useState(0.28);
   const [grid, setGrid] = useState(true);
   const [strokes, setStrokes] = useState<Stroke[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const readPhoto = useServerFn(extractTextFromImage);
 
   const font = FONTS.find((f) => f.id === fontId)!;
   const paper = PAPERS[paperIdx]!;
+
+  const chars = useMemo(() => [...text].filter((c) => c.trim().length > 0), [text]);
+  const activeChar = chars[Math.min(charIdx, Math.max(0, chars.length - 1))] ?? "";
+  const practiceText = mode === "char" ? activeChar : text;
+
+  const setTarget = (next: string) => {
+    setText(next);
+    setCharIdx(0);
+    setStrokes([]);
+  };
+
+  const gotoChar = (i: number) => {
+    if (!chars.length) return;
+    setCharIdx((i + chars.length) % chars.length);
+    setStrokes([]);
+  };
+
+  const onPhoto = async (file: File | undefined) => {
+    if (!file) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const dataUrl = await fileToDataUrl(file);
+      const res = await readPhoto({ data: { imageDataUrl: dataUrl } });
+      if (!res.text) setError("No readable text found in that photo — try a closer, sharper shot.");
+      else setTarget(res.text);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Something went wrong reading the photo.");
+    } finally {
+      setBusy(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
 
   const download = () => {
     const url = canvasRef.current?.toDataURL("image/png");
@@ -73,7 +125,7 @@ function Index() {
             </h1>
           </div>
           <p className="max-w-xs text-sm leading-relaxed text-muted-foreground">
-            A quiet pad for your spare minutes. Trace a poem, letter a slogan, or simply move a brush
+            A quiet pad for your spare minutes. Snap a slogan, trace a poem, or simply move a brush
             across paper.
           </p>
         </header>
@@ -81,7 +133,7 @@ function Index() {
         <div className="grid gap-8 lg:grid-cols-[1fr_20rem]">
           <div className="space-y-4">
             <PracticeCanvas
-              text={text}
+              text={practiceText}
               fontCss={font.css}
               ghostOpacity={ghost}
               showGrid={grid}
@@ -94,6 +146,42 @@ function Index() {
               onStrokesChange={setStrokes}
               canvasRef={canvasRef}
             />
+            {mode === "char" && chars.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => gotoChar(charIdx - 1)}
+                  className="rounded-full border border-border px-4 py-2 text-xs uppercase tracking-[0.16em] transition-colors hover:bg-secondary"
+                >
+                  Prev
+                </button>
+                <div className="flex flex-wrap gap-1">
+                  {chars.map((c, i) => (
+                    <button
+                      key={`${c}-${i}`}
+                      onClick={() => gotoChar(i)}
+                      style={{ fontFamily: font.css }}
+                      className={cn(
+                        "h-8 w-8 rounded-md border text-sm transition-colors",
+                        i === charIdx
+                          ? "border-accent bg-accent text-accent-foreground"
+                          : "border-border hover:bg-secondary",
+                      )}
+                    >
+                      {c}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  onClick={() => gotoChar(charIdx + 1)}
+                  className="rounded-full border border-border px-4 py-2 text-xs uppercase tracking-[0.16em] transition-colors hover:bg-secondary"
+                >
+                  Next
+                </button>
+                <span className="text-xs text-muted-foreground">
+                  {charIdx + 1} / {chars.length}
+                </span>
+              </div>
+            )}
             <div className="flex flex-wrap items-center gap-2">
               <button
                 onClick={() => setStrokes((s) => s.slice(0, -1))}
@@ -120,10 +208,59 @@ function Index() {
           </div>
 
           <aside className="space-y-8">
+            <Panel title="Photo">
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+                onChange={(e) => void onPhoto(e.target.files?.[0])}
+              />
+              <button
+                onClick={() => fileRef.current?.click()}
+                disabled={busy}
+                className="w-full rounded-lg border border-dashed border-border px-3 py-4 text-sm transition-colors hover:border-accent hover:text-accent disabled:opacity-60"
+              >
+                {busy ? "Reading the photo…" : "Snap or upload a slogan"}
+              </button>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                We read the words out of your photo and load them onto the pad.
+              </p>
+              {error && <p className="text-xs text-destructive">{error}</p>}
+            </Panel>
+
+            <Panel title="Practice mode">
+              <div className="grid grid-cols-2 gap-1.5">
+                {(
+                  [
+                    ["sentence", "Whole sentence"],
+                    ["char", "One character"],
+                  ] as const
+                ).map(([m, label]) => (
+                  <button
+                    key={m}
+                    onClick={() => {
+                      setMode(m);
+                      setStrokes([]);
+                    }}
+                    className={cn(
+                      "rounded-lg border px-3 py-2 text-xs transition-colors",
+                      mode === m
+                        ? "border-accent bg-accent text-accent-foreground"
+                        : "border-border hover:bg-secondary",
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </Panel>
+
             <Panel title="Text">
               <textarea
                 value={text}
-                onChange={(e) => setText(e.target.value)}
+                onChange={(e) => setTarget(e.target.value)}
                 rows={3}
                 spellCheck={false}
                 className="w-full resize-none rounded-lg border border-border bg-card px-3 py-2 text-sm leading-relaxed outline-none focus:border-accent"
@@ -133,7 +270,7 @@ function Index() {
                 {PRESETS.map((p) => (
                   <button
                     key={p.label}
-                    onClick={() => setText(p.text)}
+                    onClick={() => setTarget(p.text)}
                     title={p.note}
                     className="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground transition-colors hover:border-accent hover:text-accent"
                   >
