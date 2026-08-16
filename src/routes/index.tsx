@@ -72,9 +72,24 @@ function Index() {
   const font = FONTS.find((f) => f.id === fontId)!;
   const paper = PAPERS[paperIdx]!;
 
+  const [presetLang, setPresetLang] = useState<"zh" | "en">("zh");
+  const [presetQuery, setPresetQuery] = useState("");
+  const visiblePresets = useMemo(() => {
+    const q = presetQuery.trim().toLowerCase();
+    return PRESETS.filter(
+      (p) =>
+        p.lang === presetLang &&
+        (!q ||
+          p.label.toLowerCase().includes(q) ||
+          p.note.toLowerCase().includes(q) ||
+          p.text.toLowerCase().includes(q)),
+    );
+  }, [presetLang, presetQuery]);
+
   const chars = useMemo(() => [...text].filter((c) => c.trim().length > 0), [text]);
   const activeChar = chars[Math.min(charIdx, Math.max(0, chars.length - 1))] ?? "";
   const practiceText = mode === "char" ? activeChar : text;
+
 
   const setTarget = (next: string) => {
     setText(next);
@@ -266,10 +281,37 @@ function Index() {
                 className="w-full resize-none rounded-lg border border-border bg-card px-3 py-2 text-sm leading-relaxed outline-none focus:border-accent"
                 placeholder="Type a poem or slogan — one line per row"
               />
-              <div className="flex flex-wrap gap-1.5">
-                {PRESETS.map((p) => (
+              <div className="grid grid-cols-2 gap-1.5">
+                {(
+                  [
+                    ["zh", "中文诗词"],
+                    ["en", "English"],
+                  ] as const
+                ).map(([l, label]) => (
                   <button
-                    key={p.label}
+                    key={l}
+                    onClick={() => setPresetLang(l)}
+                    className={cn(
+                      "rounded-lg border px-3 py-2 text-xs transition-colors",
+                      presetLang === l
+                        ? "border-accent bg-accent text-accent-foreground"
+                        : "border-border hover:bg-secondary",
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <input
+                value={presetQuery}
+                onChange={(e) => setPresetQuery(e.target.value)}
+                placeholder="Search titles, authors, words…"
+                className="w-full rounded-lg border border-border bg-card px-3 py-2 text-xs outline-none focus:border-accent"
+              />
+              <div className="flex max-h-56 flex-wrap gap-1.5 overflow-y-auto pr-1">
+                {visiblePresets.map((p) => (
+                  <button
+                    key={`${p.lang}-${p.label}`}
                     onClick={() => setTarget(p.text)}
                     title={p.note}
                     className="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground transition-colors hover:border-accent hover:text-accent"
@@ -277,7 +319,11 @@ function Index() {
                     {p.label}
                   </button>
                 ))}
+                {visiblePresets.length === 0 && (
+                  <p className="text-xs text-muted-foreground">No match — type your own above.</p>
+                )}
               </div>
+
             </Panel>
 
             <Panel title="Hand">
